@@ -1,5 +1,8 @@
 import re
 
+import win32gui
+import win32con
+
 import obspython as obs
 
 DEFAULT_MONITOR = 1
@@ -24,23 +27,17 @@ def script_description():
 
 
 def script_properties():
-  p = obs.obs_properties_create()
-
-  gp = obs.obs_properties_create()
-  obs.obs_properties_add_group(p, f"projector1_group", "Projector 1", obs.OBS_GROUP_NORMAL, gp)
-  obs.obs_properties_add_text(gp, "projector1_source", "Name of Source 1", obs.OBS_TEXT_DEFAULT)
-  obs.obs_properties_add_bool(gp, f"projector1_startup", "Open on Startup")
-
   # set up the controls for the Program Output
+  p = obs.obs_properties_create()
   gp = obs.obs_properties_create()
   obs.obs_properties_add_group(p, f"{PROGRAM_NAME}{GROUP_NAME}", "Program Output", obs.OBS_GROUP_NORMAL, gp)
-  obs.obs_properties_add_int(gp, "{PROGRAM_NAME}", "Project to monitor:", 1, 10, 1)
+  obs.obs_properties_add_int(gp, "{PROGRAM_NAME}", "Project to monitor:", -1, 10, 1)
   obs.obs_properties_add_bool(gp, f"{PROGRAM_NAME}{STARTUP_NAME}", "Open on Startup")
 
   # set up the controls for the Multiview
   gp = obs.obs_properties_create()
   obs.obs_properties_add_group(p, f"{MULTIVIEW_NAME}{GROUP_NAME}", "Multiview", obs.OBS_GROUP_NORMAL, gp)
-  obs.obs_properties_add_int(gp, "{MULTIVIEW_NAME}", "Project to monitor:", 1, 10, 1)
+  obs.obs_properties_add_int(gp, "{MULTIVIEW_NAME}", "Project to monitor:", -1, 10, 1)
   obs.obs_properties_add_bool(gp, f"{MULTIVIEW_NAME}{STARTUP_NAME}", "Open on Startup")
 
   # loop through each scene and create a property group and control for choosing the monitor and startup settings
@@ -49,7 +46,7 @@ def script_properties():
     for scene in scenes:
       gp = obs.obs_properties_create()
       obs.obs_properties_add_group(p, f"{scene}{GROUP_NAME}", scene, obs.OBS_GROUP_NORMAL, gp)
-      obs.obs_properties_add_int(gp, f"{scene}", "Project to monitor:", 1, 10, 1)
+      obs.obs_properties_add_int(gp, f"{scene}", "Project to monitor:", -1, 10, 1)
       obs.obs_properties_add_bool(gp, f"{scene}{STARTUP_NAME}", "Open on Startup")
   return p
 
@@ -59,10 +56,6 @@ def script_update(settings):
 
 
 def script_load(settings):
-  # scene = obs.obs_frontend_get_current_scene()
-  # items = obs.obs_sceneitem_get_source(scene)
-  # print(items)
-
   def load_callback(e):
     if e == obs.OBS_FRONTEND_EVENT_FINISHED_LOADING:
       update_monitor_preferences(settings)
@@ -82,7 +75,6 @@ def script_load(settings):
 
 
 def script_save(settings):
-  # TODO
   for output, hotkey_id in hotkey_ids.items():
     hotkey_save_array = obs.obs_hotkey_save(hotkey_id)
     obs.obs_data_set_array(settings, output_to_function_name(output), hotkey_save_array)
@@ -100,12 +92,14 @@ def update_monitor_preferences(settings):
     if monitor is None or monitor == 0:
       monitor = DEFAULT_MONITOR
 
-    # monitors are 0 indexed here, but 1-indexed in the OBS menus
-    monitors[output] = monitor-1
+    if monitor >= 0:
+      # monitors are 0 indexed here, but 1-indexed in the OBS menus
+      monitor = monitor - 1
+
+    monitors[output] = monitor
 
     # set which projectors should open on start up
     startup_projectors[output] = obs.obs_data_get_bool(settings, f"{output}{STARTUP_NAME}")
-
 
 # register a hotkey to open a projector for each output
 def register_hotkeys(settings):
@@ -114,8 +108,15 @@ def register_hotkeys(settings):
   outputs.insert(0, PROGRAM_NAME)
 
   for output in outputs:
-    def hotkey_pressed(pressed):
+    def hotkey_pressed(pressed, output=output):
+      print(pressed)
       if not pressed:
+        if monitors[output] == -1:
+          window_handle = win32gui.FindWindow(None, f"Windowed Projector (Scene) - {output}")
+        else:
+          window_handle = win32gui.FindWindow(None, f"Fullscreen Projector (Scene) - {output}")
+        if window_handle:
+          win32gui.PostMessage(window_handle, win32con.WM_CLOSE, 0, 0)
         return
       open_fullscreen_projector(output)
 
@@ -128,9 +129,6 @@ def register_hotkeys(settings):
     obs.obs_hotkey_load(hotkey_ids[output], hotkey_save_array)
     obs.obs_data_array_release(hotkey_save_array)
 
-
-def open_window_projector(output):
-  pass
 
 # open a full screen projector
 def open_fullscreen_projector(output):
@@ -145,6 +143,7 @@ def open_fullscreen_projector(output):
   elif output == MULTIVIEW_NAME:
     projector_type = "Multiview"
 
+  print(projector_type, monitors[output], '""', output)
   # call the front end API to open the projector
   obs.obs_frontend_open_projector(projector_type, monitors[output], "", output)
 
